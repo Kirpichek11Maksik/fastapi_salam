@@ -3,32 +3,47 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-todos = []
+products = []
 
-class Todo(BaseModel):
-    title: str
+class Product(BaseModel):
+    id: int
+    name: str
+    description: str
+    category: str
 
 def check_index(index: int):
-    if index < 0 or index >= len(todos):
-        raise HTTPException(status_code=404, detail="Задача не найдена")
+    if index < 0 or index >= len(products):
+        raise HTTPException(status_code=404, detail="Продукт не найден")
 
-@app.get("/todos")
-def get_todos():
-    return todos
-@app.post("/todos")
+class ProductShort(BaseModel):
+    id: int
+    name: str
+    category: str
 
-def add_todo(todo: Todo):
-    todos.append(todo)
-    return todo
+@app.get("/products", response_model=list[ProductShort])
+def get_products(category: str | None = None):
+    if category:
+        return [product for product in products if product.category.lower() == category.lower()]
+    return products
 
-@app.delete("/todos/{index}")
-def delete_todo(index: int):
+@app.get("/products/{index}")
+def get_product(index: int):
     check_index(index)
-    todo = todos.pop(index)
-    return todo
+    return products[index]
 
-@app.put("/todos/{index}")
-def update_todo(index: int, todo: Todo):
+@app.post("/products")
+def add_product(product: Product):
+    products.append(product)
+    return product
+
+@app.delete("/products/{index}")
+def delete_product(index: int):
     check_index(index)
-    todos[index] = todo
-    return todo
+    product = products.pop(index)
+    return product
+
+@app.put("/products/{index}")
+def update_product(index: int, product: Product):
+    check_index(index)
+    products[index] = product
+    return product
