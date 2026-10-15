@@ -2,79 +2,53 @@ from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException
 from enum import Enum
 
+
 app = FastAPI()
 
-products = []
+storage = []
 
-class Category(str, Enum):
-    terminal = "terminal"
-    router = "router"
+class Brands(str, Enum):
+    HikVision = "HikVision"
+    Dahua = "Dahua"
 
-class Brand(str, Enum):
-    hikvision = "Hikvision"
-    dahua = "Dahua"
+class Location(BaseModel):
+    region: str
+    district: str
+    city: str
+    street: str
 
-class Product(BaseModel):
-    id: int
-    name: str
-    brand: Brand
-    description: str
-    category: Category
+class Terminal(BaseModel):
+    brand: Brands
+    id_number: int
+    ser_num: int
+    version_po: int
+    capacity: int
+    location: Location
 
-class ProductShort(BaseModel):
-    id: int
-    name: str
-    category: Category
+@app.post("/terminals")
+def create_terminal(terminal: Terminal):
+    storage.append(terminal)
+    return storage
 
-class ProductUpdate(BaseModel):
-    id: int | None = None
-    name: str | None = None
-    brand: Brand | None = None
-    description: str | None = None
-    category: Category | None = None
+@app.get("/terminals/{id_number}")
+def get_terminal(id_number: int):
 
-def find_index(product_id: int) -> int:
-    for i, product in enumerate(products):
-        if product.id == product_id:
+    for i in storage:
+        if id_number == i.id_number:
             return i
-    raise HTTPException(status_code=404, detail="Продукт не найден")
 
-def check_id(product_id: int):
-    for product in products:
-        if product.id == product_id:
-            raise HTTPException(status_code=400, detail="Продукт с таким id уже существует")
+    raise HTTPException(
+        status_code=404,
+        detail="Терминал с таким id не найден"
+    )
 
-def apply_update(index: int, data: dict):
-    if "id" in data and data["id"] != products[index].id:
-        check_id(data["id"])
-    products[index] = products[index].model_copy(update=data)
-    return products[index]
-
-
-@app.get("/products", response_model=list[ProductShort])
-def get_products(category: Category | None = None):
-    if category:
-        return [product for product in products if product.category == category]
-    return products
-
-@app.get("/products/{product_id}")
-def get_product(product_id: int):
-    index = find_index(product_id)
-    return products[index]
-
-@app.post("/products")
-def add_product(product: Product):
-    check_id(product.id)
-    products.append(product)
-    return product
-
-@app.delete("/products/{product_id}")
-def delete_product(product_id: int):
-    index = find_index(product_id)
-    product = products.pop(index)
-    return product
-
-@app.patch("/products/{product_id}")
-def update_product(product_id: int, product: ProductUpdate):
-    index = find_index(product_id)
-    return apply_update(index, product.model_dump(exclude_unset=True))
+@app.delete("/terminals/{id_number}")
+def delete_terminal(id_number: int):
+    for terminal in storage:
+        if terminal.id_number == id_number:
+            storage.remove(terminal)
+            return {"message": "Терминал успешно удален"}
+    raise HTTPException(
+        status_code=404,
+        detail="Терминал с таким id не найден"
+    )
