@@ -25,10 +25,19 @@ class Terminal(BaseModel):
     capacity: int
     location: Location
 
+def check_id():
+    id_numbers = [terminal.id_number for terminal in storage]
+    if len(id_numbers) in id_numbers:
+        raise HTTPException(
+            status_code=400,
+            detail="Терминал с таким id уже существует"
+        )
+
 @app.post("/terminals")
 def create_terminal(terminal: Terminal):
+    check_id()
     storage.append(terminal)
-    return storage
+    return terminal
 
 @app.get("/terminals/{id_number}")
 def get_terminal(id_number: int):
@@ -48,7 +57,7 @@ def delete_terminal(id_number: int):
         if terminal.id_number == id_number:
             storage.remove(terminal)
             return {"message": "Терминал успешно удален"}
-    raise HTTPException(
+    raise HTTPException(    
         status_code=404,
         detail="Терминал с таким id не найден"
     )
