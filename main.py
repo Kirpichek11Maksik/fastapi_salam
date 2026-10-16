@@ -1,127 +1,173 @@
+from datetime import date
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException
-from enum import Enum
-
 
 app = FastAPI()
 
-terminals_storage = []
-routers_storage = []
-brackets_storage = []
+class RefIn(BaseModel):
+    name: str
 
+class Ref(BaseModel):
+    id: int
+    name: str
 
-class TerminalBrands(str, Enum):
-    HikVision = "HikVision"
-    Dahua = "Dahua"
+class LocationIn(BaseModel):
+    name: str
+    address: str | None = None
 
-class Location(BaseModel):
-    region: str
-    district: str
-    city: str
-    street: str
+class Location(LocationIn):
+    id: int
 
-class Capacity(BaseModel):
+class DeliveryIn(BaseModel):
+    supplier: str
+    delivery_date: date
+    doc_number: str | None = None
+
+class Delivery(DeliveryIn):
+    id: int
+
+class TerminalDetails(BaseModel):
+    version_po: int
     capacity_human: int
     capacity_card: int
     user_registered: int
 
-class Terminal(BaseModel):
-    id_number: int
-    brand: TerminalBrands
-    ser_num: int
-    version_po: int
-    capacity: Capacity
-    location: Location
+class DeviceIn(BaseModel):
+    type_id: int
+    manufacturer_id: int
+    ser_num: str
+    delivery_id: int
+    status_id: int | None = None
+    location_id: int | None = None
     router_id: int | None = None
+    ip: str | None = None
+    terminal_details: TerminalDetails | None = None
 
-class Router(BaseModel):
-    id_number: int
-    ip: str
-    location: Location
+class Device(DeviceIn):
+    id: int
 
-class Bracket(BaseModel):
-    id_number: int
-    location: Location
+device_types = [Ref(id=1, name="terminal"), Ref(id=2, name="router"), Ref(id=3, name="bracket")]
+manufacturers = [Ref(id=1, name="HikVision"), Ref(id=2, name="Dahua"), Ref(id=3, name="MikroTik")]
+statuses = [Ref(id=1, name="not_installed"), Ref(id=2, name="online"), Ref(id=3, name="offline")]
+locations = []
+deliveries = []
+devices = []
 
+def next_id(storage: list):
+    return max((item.id for item in storage), default=0) + 1
 
-def check_id(id_num: int, storage: list):
-    if id_num in [item.id_number for item in storage]:
-        raise HTTPException(status_code=400, detail="Устройство с таким id уже существует")
-
-def find_by_id(id_num: int, storage: list):
+def get_or_404(id_num: int, storage: list, what: str):
     for item in storage:
-        if item.id_number == id_num:
+        if item.id == id_num:
             return item
-    return None
+    raise HTTPException(status_code=404, detail=f"{what} с таким id не найден")
 
-def search_by_location(location: str, storage: list):
-    result = []
-    for i in storage:
-        fields = [i.location.region, i.location.district, i.location.city, i.location.street]
-        if any(location.lower() in f.lower() for f in fields):
-            result.append(i)
-    if len(result) == 0:
-        raise HTTPException(status_code=404, detail="Ничего не найдено по такому местоположению")
+def add_ref_routes(path: str, storage: list):
+    @app.get(f"/{path}")
+    def get_all():
+        return storage
+
+    @app.post(f"/{path}")
+    def create(data: RefIn):
+        if any(i.name.lower() == data.name.lower() for i in storage):
+            raise HTTPException(status_code=400, detail="Такое значение уже есть")
+        item = Ref(id=next_id(storage), name=data.name)
+        storage.append(item)
+        return item
+
+add_ref_routes("device-types", device_types)
+add_ref_routes("manufacturers", manufacturers)
+add_ref_routes("statuses", statuses)
+
+@app.get("/locations")
+def get_locations():
+    return locations
+
+@app.post("/locations")
+def create_location(data: LocationIn):
+    location = Location(id=next_id(locations), **data.model_dump())
+    locations.append(location)
+    return location
+
+@app.get("/deliveries")
+def get_deliveries():
+    return deliveries
+
+@app.post("/deliveries")
+def create_delivery(data: DeliveryIn):
+    delivery = Delivery(id=next_id(deliveries), **data.model_dump())
+    deliveries.append(delivery)
+    return delivery
+
+@app.post("/devices")
+def create_device(data: DeviceIn):
+    dtype = get_or_404(data.type_id, device_types, "Тип устройства")
+    get_or_404(data.manufacturer_id, manufacturers, "Производитель")
+    get_or_404(data.delivery_id, deliveries, "Доставка")
+    if data.status_id is not None:
+        get_or_404(data.status_id, statuses, "Статус")
+    if data.location_id is not None:
+        get_or_404(data.location_id, locations, "Локация")
+
+    if any(d.ser_num == data.ser_num for d in devices):
+        raise HTTPException(status_code=400, detail="Устройство с таким серийным номером уже существует")
+
+    if dtype.name == "terminal" and data.terminal_details is None:
+        raise HTTPException(status_code=400, detail="Для терминала нужны terminal_details")
+    if dtype.name != "terminal" and data.terminal_details is not None:
+        raise HTTPException(status_code=400, detail="terminal_details бывают только у терминала")
+
+    if data.router_id is not None:
+        router = get_or_404(data.router_id, devices, "Маршрутизатор")
+        if get_or_404(router.type_id, device_types, "Тип устройства").name != "router":
+            raise HTTPException(status_code=400, detail="router_id указывает не на маршрутизатор")
+        if data.location_id != router.location_id:
+            raise HTTPException(status_code=400, detail="Локация должна совпадать с локацией маршрутизатора")
+
+    if data.ip is not None:
+        if any(d.ip == data.ip and d.router_id == data.router_id for d in devices):
+            raise HTTPException(status_code=400, detail="Такой IP уже занят в этой сети")
+
+    device = Device(id=next_id(devices), **data.model_dump())
+    devices.append(device)
+    return device
+
+@app.get("/devices")
+def get_devices(
+    location: str | None = None,
+    type_id: int | None = None,
+    manufacturer_id: int | None = None,
+    status_id: int | None = None,
+    router_id: int | None = None,
+):
+    result = devices
+
+    if location is not None:
+        text = location.lower()
+        ids = [
+            loc.id for loc in locations
+            if text in loc.name.lower() or (loc.address and text in loc.address.lower())
+        ]
+        result = [d for d in result if d.location_id in ids]
+    if type_id is not None:
+        result = [d for d in result if d.type_id == type_id]
+    if manufacturer_id is not None:
+        result = [d for d in result if d.manufacturer_id == manufacturer_id]
+    if status_id is not None:
+        result = [d for d in result if d.status_id == status_id]
+    if router_id is not None:
+        result = [d for d in result if d.router_id == router_id]
+
     return result
 
+@app.get("/devices/{device_id}")
+def get_device(device_id: int):
+    return get_or_404(device_id, devices, "Устройство")
 
-@app.get("/terminals")
-def get_terminals(location: str | None = None):
-    if location is None:
-        return terminals_storage
-    return search_by_location(location, terminals_storage)
-
-@app.post("/terminals")
-def create_terminal(terminal: Terminal):
-    check_id(terminal.id_number, terminals_storage)
-
-    if terminal.router_id is not None:
-        router = find_by_id(terminal.router_id, routers_storage)
-        if router is None:
-            raise HTTPException(status_code=404, detail="Маршрутизатор с таким id не найден")
-        if terminal.location != router.location:
-            raise HTTPException(status_code=400, detail="Локация терминала должна совпадать с локацией маршрутизатора")
-
-    terminals_storage.append(terminal)
-    return terminal
-
-@app.delete("/terminals/{id_number}")
-def delete_terminal(id_number: int):
-    for terminal in terminals_storage:
-        if terminal.id_number == id_number:
-            terminals_storage.remove(terminal)
-            return {"message": "Терминал успешно удален"}
-    raise HTTPException(status_code=404, detail="Терминал с таким id не найден")
-
-
-@app.get("/routers")
-def get_routers(location: str | None = None):
-    if location is None:
-        return routers_storage
-    return search_by_location(location, routers_storage)
-
-@app.post("/routers")
-def create_router(router: Router):
-    check_id(router.id_number, routers_storage)
-    routers_storage.append(router)
-    return router
-
-@app.get("/routers/{id_number}/terminals")
-def get_router_terminals(id_number: int):
-    router = find_by_id(id_number, routers_storage)
-    if router is None:
-        raise HTTPException(status_code=404, detail="Маршрутизатор с таким id не найден")
-    return [t for t in terminals_storage if t.router_id == id_number]
-
-
-@app.get("/brackets")
-def get_brackets(location: str | None = None):
-    if location is None:
-        return brackets_storage
-    return search_by_location(location, brackets_storage)
-
-@app.post("/brackets")
-def create_bracket(bracket: Bracket):
-    check_id(bracket.id_number, brackets_storage)
-    brackets_storage.append(bracket)
-    return bracket
+@app.delete("/devices/{device_id}")
+def delete_device(device_id: int):
+    device = get_or_404(device_id, devices, "Устройство")
+    if any(d.router_id == device_id for d in devices):
+        raise HTTPException(status_code=400, detail="К этому устройству подключены другие, сначала удалите их")
+    devices.remove(device)
+    return {"message": "Устройство успешно удалено"}
