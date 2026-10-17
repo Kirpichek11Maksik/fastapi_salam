@@ -110,23 +110,23 @@ def create_device(data: DeviceIn):
         get_or_404(data.location_id, locations, "Локация")
 
     if any(d.ser_num == data.ser_num for d in devices):
-        raise HTTPException(status_code=400, detail="Устройство с таким серийным номером уже существует")
+        raise HTTPException(status_code=400, detail="Серийный номер уже занят")
 
     if dtype.name == "terminal" and data.terminal_details is None:
-        raise HTTPException(status_code=400, detail="Для терминала нужны terminal_details")
+        raise HTTPException(status_code=400, detail="Заполните параметры устройства")
     if dtype.name != "terminal" and data.terminal_details is not None:
-        raise HTTPException(status_code=400, detail="terminal_details бывают только у терминала")
+        raise HTTPException(status_code=400, detail="Эти параметры здесь не нужны")
 
     if data.router_id is not None:
         router = get_or_404(data.router_id, devices, "Маршрутизатор")
         if get_or_404(router.type_id, device_types, "Тип устройства").name != "router":
-            raise HTTPException(status_code=400, detail="router_id указывает не на маршрутизатор")
+            raise HTTPException(status_code=400, detail="Указанное устройство не роутер")
         if data.location_id != router.location_id:
-            raise HTTPException(status_code=400, detail="Локация должна совпадать с локацией маршрутизатора")
+            raise HTTPException(status_code=400, detail="Локация не совпадает с роутером")
 
     if data.ip is not None:
         if any(d.ip == data.ip and d.router_id == data.router_id for d in devices):
-            raise HTTPException(status_code=400, detail="Такой IP уже занят в этой сети")
+            raise HTTPException(status_code=400, detail="IP уже занят в этой сети")
 
     device = Device(id=next_id(devices), **data.model_dump())
     devices.append(device)
